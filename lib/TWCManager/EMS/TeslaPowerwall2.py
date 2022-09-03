@@ -2,9 +2,6 @@
 import logging
 import time
 
-from ww import f
-
-
 logger = logging.getLogger(__name__.rsplit(".")[-1])
 
 
@@ -216,6 +213,7 @@ class TeslaPowerwall2:
             except Exception as e:
                 if hasattr(e, "response") and e.response.status_code == 403:
                     logger.info("Authentication required to access local Powerwall API")
+                    self.tokenTimeout = 0
                 else:
                     logger.log(
                         logging.INFO4,
@@ -285,14 +283,12 @@ class TeslaPowerwall2:
                             "Multiple Powerwall sites linked to your Tesla account.  Please specify the correct site ID in your config.json."
                         )
                         for (site, name) in products:
-                            logger.info(f("   {site}: {name}"))
+                            logger.info(f"   {site}: {name}")
                     else:
                         logger.info("Couldn't find a Powerwall on your Tesla account.")
 
                 if self.cloudID:
-                    url = f(
-                        "https://owner-api.teslamotors.com/api/1/energy_sites/{self.cloudID}/live_status"
-                    )
+                    url = f"https://owner-api.teslamotors.com/api/1/energy_sites/{self.cloudID}/live_status"
                     bodyjson = None
                     result = dict()
 

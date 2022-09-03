@@ -1,4 +1,7 @@
-all: general_prereqs mqtt_setup mysql_setup run_twcmanager wait preflight api ems
+all: test_direct
+test_direct: general_prereqs mqtt_setup mysql_setup run_twcmanager wait preflight api ems
+test_service: general_prereqs mqtt_setup mysql_setup run_service wait preflight api ems
+test_service_nofail: general_prereqs mqtt_setup mysql_setup run_service_nofail wait
 
 bold:=$(shell tput -T ansi bold)
 red:=$(shell tput -T ansi setaf 1)
@@ -25,13 +28,30 @@ mysql_setup:
 	@echo "${bold}${red}(P4/${pre})${reset} ${yellow}Setup MySQL Database"
 	@sudo /home/docker/.pyenv/shims/python3 scripts/mysql_setup.py
 	@echo "${bold}${red}(P5/${pre})${reset} ${yellow}Environment Preparation"
-	@sudo /home/docker/.pyenv/shims/python3 env_preparation.py
+	@sudo /home/docker/.pyenv/shims/python3 pre-flight/env_preparation.py
 	@echo "${bold}${red}(P6/${pre})${reset} ${yellow}Set up SQLite Database"
 	@sudo -u twcmanager /home/docker/.pyenv/shims/python3 scripts/sqlite_setup.py
 
+run_service:
+	@cd .. && sudo cp contrib/.twcmanager.service.testing /etc/systemd/system/twcmanager.service
+	@sudo apt-get install -y systemctl > /dev/null
+	@echo "${bold}${red}(M1/2)${reset} ${yellow}Running TWCManager"
+	@sudo /usr/bin/systemctl enable twcmanager.service --now
+	@sleep 5
+	@systemctl status twcmanager.service --full
+
+run_service_nofail:
+	@cd .. && sudo cp contrib/.twcmanager.service.testing /etc/systemd/system/twcmanager.service
+	@sudo apt-get install -y systemctl > /dev/null
+	@echo "${bold}${red}(M1/2)${reset} ${yellow}Running TWCManager"
+	@sudo /usr/bin/systemctl enable twcmanager.service --now
+	@sleep 5
+	@systemctl status twcmanager.service --full || exit 0
+	ls -l /var/log/
+
 run_twcmanager:
 	@echo "${bold}${red}(M1/2)${reset} ${yellow}Running TWCManager"
-	@cd .. && sudo -u twcmanager /home/docker/.pyenv/shims/python3 -m TWCManager &
+	@cd .. && sudo -u twcmanager /usr/bin/env PYTHONIOENCODING=UTF-8 /home/docker/.pyenv/shims/python3 -m TWCManager &
 
 upload:
 	@echo Uploading debug files
@@ -45,26 +65,32 @@ api:
 	@cd API && ./test_getConfig.py
 	@echo "${bold}${red}(A3/${api})${reset} ${yellow}Test API getLastTWCResponse"
 	@cd API && ./test_getLastTWCResponse.py
-	@echo "${bold}${red}(A4/${api})${reset} ${yellow}Test API getPolicy"
+        @echo "${bold}${red}(A4/${api})${reset} ${yellow}Test API setLatLon"
+        @cd API && ./test_setLatLon.py
+	@echo "${bold}${red}(A5/${api})${reset} ${yellow}Test API getPolicy"
 	@cd API && ./test_getPolicy.py
-	@echo "${bold}${red}(A5/${api})${reset} ${yellow}Test API getSlaveTWCs"
+	@echo "${bold}${red}(A6/${api})${reset} ${yellow}Test API getSlaveTWCs"
 	@cd API && ./test_getSlaveTWCs.py
-	@echo "${bold}${red}(A6/${api})${reset} ${yellow}Test API getStatus"
+	@echo "${bold}${red}(A7/${api})${reset} ${yellow}Test API getStatus"
 	@cd API && ./test_getStatus.py
-	@echo "${bold}${red}(A7/${api})${reset} ${yellow}Test API chargeNow functionality"
+	@echo "${bold}${red}(A8/${api})${reset} ${yellow}Test API chargeNow functionality"
 	@cd API && ./test_chargeNow.py
-	@echo "${bold}${red}(A8/${api})${reset} ${yellow}Test API sendStartCommand"
+	@echo "${bold}${red}(A9/${api})${reset} ${yellow}Test API sendStartCommand"
 	@cd API && ./test_sendStartCommand.py
-	@echo "${bold}${red}(A9/${api})${reset} ${yellow}Test API sendStopCommand"
+	@echo "${bold}${red}(A10/${api})${reset} ${yellow}Test API sendStopCommand"
 	@cd API && ./test_sendStopCommand.py
-	@echo "${bold}${red}(A10/${api})${reset} ${yellow}Test API consumption offsets"
+	@echo "${bold}${red}(A11/${api})${reset} ${yellow}Test API consumption offsets"
 	@cd API && ./test_consumptionOffsets.py
+	@echo "${bold}${red}(A12/${api})${reset} ${yellow}Test API getActivePolicyAction"
+	@cd API && ./test_getActivePolicyAction.py
 
 ems:
 	@echo "${bold}${red}(E1/${ems})${reset} ${yellow}Starting EMS Test Web Server"
 	@cd EMS && ./ems_emulator.py &
 	@echo "${bold}${red}(E2/${ems})${reset} ${yellow}Testing SmartPi EMS Module"
 	cd EMS && ./test_SmartPi.py
+	@echo "${bold}${red}(E3/${ems})${reset} ${yellow}Testing MQTT EMS Module"
+	cd EMS && ./test_MQTT.py
 
 preflight:
 	@echo "${bold}${red}(P7/${pre})${reset} ${yellow}Testing file existence and permissions"

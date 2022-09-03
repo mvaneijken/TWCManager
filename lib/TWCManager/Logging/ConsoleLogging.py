@@ -3,7 +3,6 @@ import logging
 
 import sys
 from termcolor import colored
-from ww import f
 
 
 logger = logging.getLogger(__name__.rsplit(".")[-1])
@@ -52,17 +51,22 @@ class ConsoleLogging:
             self.configLogging["mute"] = {}
 
         # Initialize Logger
-        color_formatter = ColorFormatter(
-            colored("%(asctime)s", "yellow")
-            + " "
-            + colored("%(name)-10.10s", "green")
-            + " "
-            + colored("%(levelno)d", "cyan")
-            + " %(message)s",
-            "%H:%M:%S",
-        )
         handler = logging.StreamHandler(sys.stdout)
-        handler.setFormatter(color_formatter)
+        if self.configLogging.get("simple", False):
+            handler.setFormatter(
+                logging.Formatter("%(name)-10.10s %(levelno)02d %(message)s")
+            )
+        else:
+            color_formatter = ColorFormatter(
+                colored("%(asctime)s", "yellow")
+                + " "
+                + colored("%(name)-10.10s", "green")
+                + " "
+                + colored("%(levelno)d", "cyan")
+                + " %(message)s",
+                "%H:%M:%S",
+            )
+            handler.setFormatter(color_formatter)
         # handler.setLevel(logging.INFO)
         logging.getLogger("").addHandler(handler)
 

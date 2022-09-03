@@ -69,18 +69,15 @@
         # for this many seconds.
         #"startStopDelay": 60,
 
-        # When you have more than one vehicle associated with the Tesla car API and
-        # onlyChargeMultiCarsAtHome = True, cars will only be controlled by the API when
-        # parked at home. For example, when one vehicle is plugged in at home and
-        # another is plugged in at a remote location and you've set TWCManager to stop
-        # charging at the current time, only the one plugged in at home will be stopped
-        # from charging using the car API.
-        # Unfortunately, bugs in the car GPS system may cause a car to not be reported
-        # as at home even if it is, in which case the car might not be charged when you
-        # expect it to be. If you encounter that problem with multiple vehicles, you can
-        # set onlyChargeMultiCarsAtHome = False, but you may encounter the problem of
-        # a car not at home being stopped from charging by the API.
-        "onlyChargeMultiCarsAtHome": true,
+        # Depending on your environment and experience with GPS location quality, you
+        # may want to choose how close a car needs to be to your home location to be
+        # considered "at home". Value is given in feet, one foot is about 0.3 meters.
+        # The default value is 10560 feet (2 miles), as cars in the past had quite some
+        # issues with location accuracy. Do not set this too low, but about 1000 feet
+        # should be safe usually.
+        # Note the covered area is actually not a circle, but a square with a side length
+        # of 2 * atHomeRadius (measured east-west & south-north).
+        # "atHomeRadius": 1000,
 
         # Newer TWCs can report actual voltages.  For older TWCs, you can specify
         # what voltage should be assumed and whether the power is single (1) or
@@ -208,9 +205,15 @@
       "RS485": {
         "enabled": true,
 
-        # TWC's rs485 port runs at 9600 baud which has been verified with an
+        # TWC's RS485 port runs at 9600 baud which has been verified with an
         # oscilloscope. Don't change this unless something changes in future hardware.
         "baud": 9600,
+
+        # This value allows overriding of the default 26 second heartbeat timeout for Slave TWCs.
+        # This value should work in hard-wired systems, but if you are using network
+        # to RS485 adapters and experiencing occasional network loss or latency, this
+        # value can be tuned to extend the timeout.
+        #"slaveTimeout": 26,
 
         # Most users will have only one ttyUSB adapter plugged in and
         # '/dev/ttyUSB0' will work. If not, run 'dmesg |grep ttyUSB' on the
@@ -272,6 +275,14 @@
     # - Evaluate any user defined extensions in the after section below
     # - Outside Scheduled Charging, charge at unscheduled charge rate
     "policy":{
+      # By default, EMS modules are polled only when the data is needed
+      # to track green energy. If you would like to always poll EMS for
+      # display purposes, uncomment this.
+      #
+      # This will not work for custom policies which specify their own
+      # background task.
+      #"alwaysPollEMS": true,
+
       "engine":{
         "policyCheckInterval": 30
       },
@@ -366,7 +377,9 @@
         # a pi, it may mean considering alternatives such as a remote database
         # to reduce write cycles.
         "Console": {
-            "enabled": true
+            "enabled": true,
+            # simple logging format omits timestamp and colorization
+            #"simple": true
         },
         "FileLogger": {
           "enabled": false,
@@ -420,7 +433,7 @@
                 "ChargeSessions": false,
                 "GreenEnergy": true,
                 "SlavePower": true,
-                "SlaveStatus": true,
+                "SlaveStatus": true
             }
         },
         "MySQL": {
@@ -519,9 +532,21 @@
             "outputGeneration":  "Solar"
         },
         "MQTT": {
-      # MQTT Sensor support for reading generation or consumption data.
-      # This is not yet available.
-          "enabled": false
+          "enabled": false,
+          "brokerIP": "192.168.1.2",
+      # The MQTT EMS module subscribes to the below topics to read Consumption/Generation values
+          "username": "mqttuser",
+          "password": "mqttpass",
+          "topicConsumption": "",
+          "topicGeneration": ""
+        },
+        "P1Monitor":{
+          # Support for P1 Monitor API (https://www.ztatz.nl/)
+          # Reads /api/v1/phase
+          "enabled": false,
+          "serverIP":"192.168.1.2",
+          # Amount of samples to take average from (min 1, max 10, default 1)
+          "samples": 1
         },
         "OpenWeatherMap": {
             "enabled": false,
@@ -558,12 +583,29 @@
           "serverPort": "1080"
         },
       # SolarEdge API, consumed from the internet-based SolarEdge Potal
+      # or directly from a local inverter with smart meter via modbus TCP
+      # NOTE: inverter needs to have modbus TCP enabled - call or email
+      #       SolarEdge to enable it for you or use SetApp to enable it
         "SolarEdge": {
           "enabled": false,
       # API Key must be specified in order to monitor a SolarEdge site
           "apiKey": "",
       # Site ID defines which system to monitor
-          "siteID": ""
+          "siteID": "",
+      ## or local inverter, "apiKey" and "siteID" are ignored if you use this
+      # local IP address or hostname of inverter
+          #"inverterHost": "",
+      # default port is 1502, shouldn't need to be changed
+          #"inverterPort": 1502,
+      # you need 1 smart meter to track consumption, up to 3 are supported
+      # NOTE: if a network part is metered by both a consumption and an export
+      #       meter, only add one of them or consumption will be counted twice
+          #"smartMeters": [{
+      # smart meter names currently may be "Meter1", "Meter2", "Meter3"
+          #  "name": "Meter1",
+      # specify what is metered: "consumption" or "export"
+          #  "type": "export"
+          #}]
         },
       # SolarLog Inverters
         "SolarLog": {
@@ -587,7 +629,7 @@
           "serverPort": "8080"
         },
         "Volkszahler": {
-          "enabled": true,
+          "enabled": false,
           # Yes, you can install TWCManager on same raspi as Volkszäher. (this needs to change "control" > "listenPort" to 8181)
           "serverIP": "127.0.0.1",
           # Port of Volkszahler frontend (not from VZLOGGER).
@@ -596,8 +638,18 @@
           "uuidPhotovoltaikW": "00000006-0002-1570-ffff-0123456789ab",
           # Consumption from grid as positive values or Push to grid as negative values.
           "uuidTotalGridW": "1cbbe494-a049-11eb-bcbc-0242ac130002"
+        },
+        # The URL module allows fetching of consumption and generation data from URL items.
+        # If you do not track one of these values (generation or consumption) via URL, leave
+        # the parameter blank, and it will not be retrieved.
+        # Full URLs should use format http[s]://abc/def/[consumptionItemValue|generationItemValue]
+        "URL": {
+          "enabled": false,
+          "url": "http(s)://your/base/url/without/slash/at/end",
+          "consumptionItem": "Consumption item name",
+          "generationItem": "Generation item name"
         }
-    },
+      },
 
     # Status plugins allow us to export status detail out of TWCManager.
     # This will use interfaces such as MQTT or HomeAssistant API to update status for charging, power draw, etc.
@@ -630,12 +682,32 @@
         "MQTT": {
             "enabled": false,
             "brokerIP": "192.168.1.1",
-            "topicPrefix": "TWC"
+            "topicPrefix": "TWC",
+
+       # By default we rate-limit per-topic to avoid excessive load on the MQTT server. You are free to reduce the
+       # rate limit value as low as you'd like - zero will disable rate limiting altogether. The default is one
+       # update per topic every 60 seconds
+            "ratelimit": 60,
 
        # Username and password are optional. If your broker requires a username and password to authenticate
        # clients, set them here. Otherwise, leave them commented out
           #  "username": "mqttuser",
           #  "password": "mqttpass"
+        }
+    },
+    "vehicle": {
+        "TeslaMate": {
+            "enabled": false,
+            "syncTokens": false,
+            "db_host": "192.168.1.1",
+            "db_name": "teslamate",
+            "db_pass": "teslamate",
+            "db_user": "teslamate",
+            "syncTelemetry": false,
+            "mqtt_host": "192.168.1.1",
+            "mqtt_user": "teslamate",
+            "mqtt_pass": "teslamate",
+            "mqtt_prefix": "teslamate"
         }
     }
 }

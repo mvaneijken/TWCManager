@@ -75,8 +75,9 @@ The following API endpoints exist:
 | getPolicy                | GET  | Provides the policy configuration                 |
 | getSlaveTWCs             | GET  | Provides a list of connected Slave TWCs and their state |
 | getStatus                | GET  | Provides the current status (Charge Rate, Policy) |
+| getUUID                  | GET  | Provides a unique ID for this particular master, based on the physical MAC address |
 | [saveSettings](control_HTTP_API/saveSettings.md)         | POST | Saves settings to settings file |
 | [sendStartCommand](control_HTTP_API/sendStartCommand.md) | POST | Sends the Start command to all Slave TWCs    |
-| setSetting               | POST | Set settings |
+| [setSetting](control_HTTP_API/setSetting.md)             | POST | Set settings directly via API |
 | [sendStopCommand](control_HTTP_API/sendStopCommand.md)   | POST | Sends the Stop command to all Slave TWCs     |
 | [setScheduledChargingSettings](control_HTTP_API/setScheduledChargingSettings.md)  | POST | Saves Scheduled Charging settings --> can be retrieved with getStatus |

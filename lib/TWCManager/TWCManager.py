@@ -27,9 +27,7 @@
 #
 # For more information, please visit http://unlicense.org
 
-import commentjson
 import importlib
-import json
 import logging
 import os.path
 import math
@@ -37,9 +35,9 @@ import re
 import sys
 import time
 import traceback
-from datetime import datetime
+import datetime
+import yaml
 import threading
-from ww import f
 from TWCManager.TWCMaster import TWCMaster
 import requests
 from enum import Enum
@@ -65,7 +63,7 @@ logging.INFO9 = 12
 logging.DEBUG2 = 9
 
 
-logger = logging.getLogger("TWCManager")
+logger = logging.getLogger("\u26FD Manager")
 
 # Define available modules for the instantiator
 # All listed modules will be loaded at boot time
@@ -83,19 +81,23 @@ modules_available = [
     "Interface.TCP",
     "Policy.Policy",
     "Vehicle.TeslaAPI",
+    "Vehicle.TeslaMateVehicle",
     "Control.WebIPCControl",
     "Control.HTTPControl",
     "Control.MQTTControl",
-#    "Control.OCPPControl",
+    #    "Control.OCPPControl",
     "EMS.Efergy",
+    "EMS.EmonCMS",
     "EMS.Enphase",
     "EMS.Fronius",
     "EMS.Growatt",
     "EMS.HASS",
     "EMS.IotaWatt",
     "EMS.Kostal",
+    "EMS.MQTT",
     "EMS.OpenHab",
     "EMS.OpenWeatherMap",
+    "EMS.P1Monitor",
     "EMS.SmartMe",
     "EMS.SmartPi",
     "EMS.SolarEdge",
@@ -103,6 +105,7 @@ modules_available = [
     "EMS.TeslaPowerwall2",
     "EMS.TED",
     "EMS.Volkszahler",
+    "EMS.URL",
     "Status.HASSStatus",
     "Status.MQTTStatus",
 ]
@@ -125,7 +128,15 @@ else:
         jsonconfig = open("config.json")
 
 if jsonconfig:
-    config = commentjson.load(jsonconfig)
+    configtext = ""
+    for line in jsonconfig:
+        if line.lstrip().startswith("//") or line.lstrip().startswith("#"):
+            configtext += "\n"
+        else:
+            configtext += line.replace("\t", " ").split("#")[0]
+
+    config = yaml.safe_load(configtext)
+    configtext = None
 else:
     logger.error("Unable to find a configuration file.")
     sys.exit()
@@ -185,7 +196,7 @@ def hex_str(ba: bytearray):
 
 def time_now():
     global config
-    return datetime.now().strftime(
+    return datetime.datetime.now().strftime(
         "%H:%M:%S" + (".%f" if config["config"]["displayMilliseconds"] else "")
     )
 
@@ -239,60 +250,77 @@ def background_tasks_thread(master):
         try:
             task = master.getBackgroundTask()
 
-            if task["cmd"] == "applyChargeLimit":
-                carapi.applyChargeLimit(limit=task["limit"])
-            elif task["cmd"] == "charge":
-                # car_api_charge does nothing if it's been under 60 secs since it
-                # was last used so we shouldn't have to worry about calling this
-                # too frequently.
-                carapi.car_api_charge(task["charge"])
-            elif task["cmd"] == "carApiEmailPassword":
-                carapi.resetCarApiLastErrorTime()
-                carapi.car_api_available(task["email"], task["password"])
-            elif task["cmd"] == "checkArrival":
-                limit = (
-                    carapi.lastChargeLimitApplied
-                    if carapi.lastChargeLimitApplied != 0
-                    else -1
-                )
-                carapi.applyChargeLimit(limit=limit, checkArrival=True)
-            elif task["cmd"] == "checkCharge":
-                carapi.updateChargeAtHome()
-            elif task["cmd"] == "checkDeparture":
-                carapi.applyChargeLimit(
-                    limit=carapi.lastChargeLimitApplied, checkDeparture=True
-                )
-            elif task["cmd"] == "checkGreenEnergy":
-                check_green_energy()
-            elif task["cmd"] == "checkVINEntitlement":
-                # The two possible arguments are task["subTWC"] which tells us
-                # which TWC to check, or task["vin"] which tells us which VIN
-                if task.get("vin", None):
-                    task["subTWC"] = master.getTWCbyVIN(task["vin"])
+            if "cmd" in task:
+                if task["cmd"] == "applyChargeLimit":
+                    carapi.applyChargeLimit(limit=task["limit"])
+                elif task["cmd"] == "charge":
+                    # car_api_charge does nothing if it's been under 60 secs since it
+                    # was last used so we shouldn't have to worry about calling this
+                    # too frequently.
+                    carapi.car_api_charge(task["charge"])
+                elif task["cmd"] == "carApiEmailPassword":
+                    carapi.resetCarApiLastErrorTime()
+                    carapi.car_api_available(task["email"], task["password"])
+                elif task["cmd"] == "checkArrival":
+                    limit = (
+                        carapi.lastChargeLimitApplied
+                        if carapi.lastChargeLimitApplied != 0
+                        else -1
+                    )
+                    carapi.applyChargeLimit(limit=limit, checkArrival=True)
+                elif task["cmd"] == "checkCharge":
+                    carapi.updateChargeAtHome()
+                elif task["cmd"] == "checkDeparture":
+                    carapi.applyChargeLimit(
+                        limit=carapi.lastChargeLimitApplied, checkDeparture=True
+                    )
+                elif task["cmd"] == "checkGreenEnergy":
+                    check_green_energy()
+                elif task["cmd"] == "checkVINEntitlement":
+                    # The two possible arguments are task["subTWC"] which tells us
+                    # which TWC to check, or task["vin"] which tells us which VIN
+                    if task.get("vin", None):
+                        task["subTWC"] = master.getTWCbyVIN(task["vin"])
 
-                if task["subTWC"]:
-                    if master.checkVINEntitlement(task["subTWC"]):
-                        logger.info("Vehicle %s on TWC %02X%02X is permitted to charge." % (task["subTWC"].currentVIN, task["subTWC"].TWCID[0], task["subTWC"].TWCID[1]))
+                    if task["subTWC"]:
+                        if master.checkVINEntitlement(task["subTWC"]):
+                            logger.info(
+                                "Vehicle %s on TWC %02X%02X is permitted to charge."
+                                % (
+                                    task["subTWC"].currentVIN,
+                                    task["subTWC"].TWCID[0],
+                                    task["subTWC"].TWCID[1],
+                                )
+                            )
+                        else:
+                            logger.info(
+                                "Vehicle %s on TWC %02X%02X is not permitted to charge. Terminating session."
+                                % (
+                                    task["subTWC"].currentVIN,
+                                    task["subTWC"].TWCID[0],
+                                    task["subTWC"].TWCID[1],
+                                )
+                            )
+                            master.sendStopCommand(task["subTWC"].TWCID)
+
+                elif task["cmd"] == "getLifetimekWh":
+                    master.getSlaveLifetimekWh()
+                elif task["cmd"] == "getVehicleVIN":
+                    master.getVehicleVIN(task["slaveTWC"], task["vinPart"])
+                elif task["cmd"] == "snapHistoryData":
+                    master.snapHistoryData()
+                elif task["cmd"] == "updateStatus":
+                    update_statuses()
+                elif task["cmd"] == "webhook":
+                    if config["config"].get("webhookMethod", "POST") == "GET":
+                        requests.get(task["url"])
                     else:
-                        logger.info("Vehicle %s on TWC %02X%02X is not permitted to charge. Terminating session." % (task["subTWC"].currentVIN, task["subTWC"].TWCID[0], task["subTWC"].TWCID[1]))
-                        master.sendStopCommand(task["subTWC"].TWCID)
-
-            elif task["cmd"] == "getLifetimekWh":
-                master.getSlaveLifetimekWh()
-            elif task["cmd"] == "getVehicleVIN":
-                master.getVehicleVIN(task["slaveTWC"], task["vinPart"])
-            elif task["cmd"] == "snapHistoryData":
-                master.snapHistoryData()
-            elif task["cmd"] == "updateStatus":
-                update_statuses()
-            elif task["cmd"] == "webhook":
-                if config["config"].get("webhookMethod", "POST") == "GET":
-                    requests.get(task["url"])
-                else:
-                    body = master.getStatus()
-                    requests.post(task["url"], json=body)
-            elif task["cmd"] == "saveSettings":
-                master.saveSettings()
+                        body = master.getStatus()
+                        requests.post(task["url"], json=body)
+                elif task["cmd"] == "saveSettings":
+                    master.saveSettings()
+                elif task["cmd"] == "sunrise":
+                    update_sunrise_sunset()
 
         except:
             logger.info(
@@ -304,14 +332,10 @@ def background_tasks_thread(master):
             )
             pass
 
-        # Delete task['cmd'] from backgroundTasksCmds such that
-        # queue_background_task() can queue another task['cmd'] in the future.
-        master.deleteBackgroundTask(task)
-
         # task_done() must be called to let the queue know the task is finished.
         # backgroundTasksQueue.join() can then be used to block until all tasks
         # in the queue are done.
-        master.doneBackgroundTask()
+        master.doneBackgroundTask(task)
 
 
 def check_green_energy():
@@ -340,7 +364,7 @@ def update_statuses():
     # Print a status update if we are on track green energy showing the
     # generation and consumption figures
     maxamps = master.getMaxAmpsToDivideAmongSlaves()
-    maxampsDisplay = f("{maxamps:.2f}A")
+    maxampsDisplay = f"{maxamps:.2f}A"
     if master.getModuleByName("Policy").policyIsGreen():
         genwatts = master.getGeneration()
         conwatts = master.getConsumption()
@@ -361,68 +385,78 @@ def update_statuses():
             "genWatts": genwatts,
             "conWatts": conwatts,
             "chgWatts": chgwatts,
-            "colored": "magenta"
+            "colored": "magenta",
         }
 
-        if ((genwatts or conwatts) and (not conoffset and not othwatts)):
+        if (genwatts or conwatts) and (not conoffset and not othwatts):
 
             logger.info(
                 "Green energy Generates %s, Consumption %s (Charger Load %s)",
-                f("{genwatts:.0f}W"),
-                f("{conwatts:.0f}W"),
-                f("{chgwatts:.0f}W"),
+                f"{genwatts:.0f}W",
+                f"{conwatts:.0f}W",
+                f"{chgwatts:.0f}W",
                 extra=logExtra,
             )
 
-        elif ((genwatts or conwatts) and othwatts and not conoffset):
+        elif (genwatts or conwatts) and othwatts and not conoffset:
 
             logger.info(
                 "Green energy Generates %s, Consumption %s (Charger Load %s, Other Load %s)",
-                f("{genwatts:.0f}W"),
-                f("{conwatts:.0f}W"),
-                f("{chgwatts:.0f}W"),
-                f("{othwatts:.0f}W"),
+                f"{genwatts:.0f}W",
+                f"{conwatts:.0f}W",
+                f"{chgwatts:.0f}W",
+                f"{othwatts:.0f}W",
                 extra=logExtra,
             )
 
-        elif ((genwatts or conwatts) and othwatts and conoffset > 0):
+        elif (genwatts or conwatts) and othwatts and conoffset > 0:
 
             logger.info(
                 "Green energy Generates %s, Consumption %s (Charger Load %s, Other Load %s, Offset %s)",
-                f("{genwatts:.0f}W"),
-                f("{conwatts:.0f}W"),
-                f("{chgwatts:.0f}W"),
-                f("{othwatts:.0f}W"),
-                f("{conoffset:.0f}W"),
+                f"{genwatts:.0f}W",
+                f"{conwatts:.0f}W",
+                f"{chgwatts:.0f}W",
+                f"{othwatts:.0f}W",
+                f"{conoffset:.0f}W",
                 extra=logExtra,
             )
 
-        elif ((genwatts or conwatts) and othwatts and conoffset < 0):
+        elif (genwatts or conwatts) and othwatts and conoffset < 0:
 
             logger.info(
                 "Green energy Generates %s (Offset %s), Consumption %s (Charger Load %s, Other Load %s)",
-                f("{genwatts:.0f}W"),
-                f("{(-1 * conoffset):.0f}W"),
-                f("{conwatts:.0f}W"),
-                f("{chgwatts:.0f}W"),
-                f("{othwatts:.0f}W"),
+                f"{genwatts:.0f}W",
+                f"{(-1 * conoffset):.0f}W",
+                f"{conwatts:.0f}W",
+                f"{chgwatts:.0f}W",
+                f"{othwatts:.0f}W",
                 extra=logExtra,
             )
 
         nominalOffer = master.convertWattsToAmps(
-            genwatts + (chgwatts if (config["config"]["subtractChargerLoad"] and conwatts == 0) else 0)
-            - (conwatts - (chgwatts if (config["config"]["subtractChargerLoad"] and conwatts > 0) else 0))
-        )
-        if abs(maxamps - nominalOffer) > 0.005:
-            nominalOfferDisplay = f("{nominalOffer:.2f}A")
-            logger.debug(
-                f(
-                    "Offering {maxampsDisplay} instead of {nominalOfferDisplay} to compensate for inexact current draw"
+            genwatts
+            + (
+                chgwatts
+                if (config["config"]["subtractChargerLoad"] and conwatts == 0)
+                else 0
+            )
+            - (
+                conwatts
+                - (
+                    chgwatts
+                    if (config["config"]["subtractChargerLoad"] and conwatts > 0)
+                    else 0
                 )
             )
+        )
+        if abs(maxamps - nominalOffer) > 0.005:
+            nominalOfferDisplay = f"{nominalOffer:.2f}A"
+            logger.debug(
+                f"Offering {maxampsDisplay} instead of {nominalOfferDisplay} to compensate for inexact current draw"
+            )
             conwatts = genwatts - master.convertAmpsToWatts(maxamps)
-        generation = f("{master.convertWattsToAmps(genwatts):.2f}A")
-        consumption = f("{master.convertWattsToAmps(conwatts):.2f}A")
+        generation = f"{master.convertWattsToAmps(genwatts):.2f}A"
+        consumption = f"{master.convertWattsToAmps(conwatts):.2f}A"
         logger.info(
             "Limiting charging to %s - %s = %s.",
             generation,
@@ -438,7 +472,7 @@ def update_statuses():
         )
 
     # Print minimum charge for all charging policies
-    minchg = f("{config['config']['minAmpsPerTWC']}A")
+    minchg = f"{config['config']['minAmpsPerTWC']}A"
     logger.info(
         "Charge when above %s (minAmpsPerTWC).", minchg, extra={"colored": "magenta"}
     )
@@ -459,6 +493,60 @@ def update_statuses():
             master.getMaxAmpsToDivideAmongSlaves(),
             "A",
         )
+
+
+def update_sunrise_sunset():
+
+    ltNow = time.localtime()
+    latlong = master.getHomeLatLon()
+    if latlong[0] == 10000:
+        # We don't know where home is; keep defaults
+        master.settings["sunrise"] = 6
+        master.settings["sunset"] = 20
+    else:
+        sunrise = 6
+        sunset = 20
+        url = (
+            "https://api.sunrise-sunset.org/json?lat="
+            + str(latlong[0])
+            + "&lng="
+            + str(latlong[1])
+            + "&formatted=0&date="
+            + "-".join([str(ltNow.tm_year), str(ltNow.tm_mon), str(ltNow.tm_mday)])
+        )
+
+        r = {}
+        try:
+            r = requests.get(url).json().get("results")
+        except:
+            pass
+
+        if r.get("sunrise", None):
+            try:
+                dtSunrise = datetime.datetime.astimezone(
+                    datetime.datetime.fromisoformat(r["sunrise"])
+                )
+                sunrise = dtSunrise.hour + (1 if dtSunrise.minute >= 30 else 0)
+            except:
+                pass
+
+        if r.get("sunset", None):
+            try:
+                dtSunset = datetime.datetime.astimezone(
+                    datetime.datetime.fromisoformat(r["sunset"])
+                )
+                sunset = dtSunset.hour + (1 if dtSunset.minute >= 30 else 0)
+            except:
+                pass
+
+        master.settings["sunrise"] = sunrise
+        master.settings["sunset"] = sunset
+
+    tomorrow = datetime.datetime.combine(
+        datetime.datetime.today(), datetime.time(hour=1)
+    ) + datetime.timedelta(days=1)
+    diff = tomorrow - datetime.datetime.now()
+    master.queue_background_task({"cmd": "sunrise"}, diff.total_seconds())
 
 
 #
@@ -515,7 +603,11 @@ for module in modules_available:
     try:
         # Pre-emptively skip modules that we know are not configured
         configlocation = master.translateModuleNameToConfig(modulename)
-        if not config.get(configlocation[0], {}).get(configlocation[1], {}).get("enabled", 1):
+        if (
+            not config.get(configlocation[0], {})
+            .get(configlocation[1], {})
+            .get("enabled", 1)
+        ):
             # We can see that this module is explicitly disabled in config, skip it
             continue
 
@@ -557,6 +649,8 @@ master.loadSettings()
 backgroundTasksThread = threading.Thread(target=background_tasks_thread, args=(master,))
 backgroundTasksThread.daemon = True
 backgroundTasksThread.start()
+
+master.queue_background_task({"cmd": "sunrise"}, 30)
 
 logger.info(
     "TWC Manager starting as fake %s with id %02X%02X and sign %02X"
@@ -609,7 +703,9 @@ while True:
                     # It's been about a second since our last heartbeat.
                     if master.countSlaveTWC() > 0:
                         slaveTWC = master.getSlaveTWC(idxSlaveToSendNextHeartbeat)
-                        if time.time() - slaveTWC.timeLastRx > 26:
+                        if time.time() - slaveTWC.timeLastRx > config.get(
+                            "interfaces", {}
+                        ).get("RS485", {}).get("slaveTimeout", 26):
                             # A real master stops sending heartbeats to a slave
                             # that hasn't responded for ~26 seconds. It may
                             # still send the slave a heartbeat every once in
@@ -746,7 +842,8 @@ while True:
                 continue
             elif dataLen and len(data) == 0:
                 logger.error(
-                    "We received a buffer length of %s from the RS485 module, but data buffer length is %s. This should not occur." % (str(actualDataLen), str(len(data)))
+                    "We received a buffer length of %s from the RS485 module, but data buffer length is %s. This should not occur."
+                    % (str(actualDataLen), str(len(data)))
                 )
 
             if msgLen == 0:
@@ -863,7 +960,6 @@ while True:
 
                 msgMatch = re.search(
                     b"^\xfd\xe2(..)(.)(..)\x00\x00\x00\x00\x00\x00.+\Z", msg, re.DOTALL
-
                 )
                 if msgMatch and foundMsgMatch == False:
                     # Handle linkready message from slave.
@@ -1137,7 +1233,7 @@ while True:
                         potentialVIN = "".join(slaveTWC.VINData)
 
                         # Ensure we have a valid VIN
-                        if len(potentialVIN) == 17:
+                        if len(potentialVIN) == 17 or len(potentialVIN) == 0:
                             # Record Vehicle VIN
                             slaveTWC.currentVIN = potentialVIN
 
@@ -1171,7 +1267,6 @@ while True:
                                     "vinPart": 0,
                                 }
                             )
-
 
                     logger.log(
                         logging.INFO6,

@@ -1,7 +1,7 @@
 import logging
 import time
 
-logger = logging.getLogger(__name__.rsplit(".")[-1])
+logger = logging.getLogger("\U0001F50C RS485")
 
 
 class RS485:
@@ -48,6 +48,13 @@ class RS485:
         elif porta:
             self.port = porta
 
+        self.connect()
+
+    def connect(self):
+        # Reset any Slave TWC last RX heartbeat counters in case serial reconnection has occurred
+        for slaveTWC in self.master.getSlaveTWCs():
+            slaveTWC.timeLastRx = time.time()
+
         # Connect to serial port
         self.ser = self.serial.serial_for_url(self.port, self.baud, timeout=0)
 
@@ -62,7 +69,16 @@ class RS485:
 
     def read(self, len):
         # Read the specified amount of data from the serial interface
-        return self.ser.read(len)
+        try:
+            return self.ser.read(len)
+        except serial.serialutil.SerialException as e:
+            logger.log(
+                logging.ERROR,
+                "Error reading from serial interface: {}. Will attempt re-connect.".format(
+                    e
+                ),
+            )
+            self.connect()
 
     def send(self, msg):
         # Send msg on the RS485 network. We'll escape bytes with a special meaning,
@@ -74,7 +90,7 @@ class RS485:
         for i in range(1, len(msg)):
             checksum += msg[i]
 
-        msg.append(checksum & 0xff)
+        msg.append(checksum & 0xFF)
 
         # Escaping special chars:
         # The protocol uses C0 to mark the start and end of the message.  If a C0
@@ -88,10 +104,10 @@ class RS485:
 
         i = 0
         while i < len(msg):
-            if msg[i] == 0xc0:
+            if msg[i] == 0xC0:
                 msg[i : i + 1] = b"\xdb\xdc"
                 i = i + 1
-            elif msg[i] == 0xdb:
+            elif msg[i] == 0xDB:
                 msg[i : i + 1] = b"\xdb\xdd"
                 i = i + 1
             i = i + 1

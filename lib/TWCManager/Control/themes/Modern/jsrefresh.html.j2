@@ -14,8 +14,8 @@
                     var surplus = 0;
 
                     Object.keys(json).forEach(function(key) {
-                        if (key == 'generationWatts' || key == 'consumptionWatts' || key == 'chargerLoadWatts') {
-                            var gen = json[key];
+                        if (key === 'generationWatts' || key === 'consumptionWatts' || key === 'chargerLoadWatts') {
+                            let gen = json[key];
                             if (gen > 1000) {
                                 gen = gen * 0.001;
                                 json[key] = gen.toFixed(2) + '&nbsp;<span class="text-secondary">kW</span>';
@@ -27,7 +27,7 @@
                     });
 
                     // calculate power surplus
-                    var surplusAmps = 0.0;
+                    let surplusAmps = 0.0;
                     if (generation > consumption) {
                         surplus = generation - consumption;
                         if (surplus > 1000) {
@@ -68,6 +68,57 @@
         requestStatus();
     });
 
+    // AJAX refresh to retrieve active policy action and update UI
+    $(document).ready(function() {
+        function updateAction() {
+            $.ajax({
+                url: "/api/getActivePolicyAction",
+                dataType: "text",
+                cache: false,
+                success: function(data) {
+                    var json = $.parseJSON(data);
+                    // change the state of the Charge Policy display buttons based on Charge Policy Action
+                    if (json == 3) {
+                        $("#policy_solar").removeClass("btn-outline-primary");
+                        $("#policy_solar").addClass("btn-primary");
+                        $("#policy_fixed").removeClass("btn-primary");
+                        $("#policy_fixed").addClass("btn-outline-primary");
+                        $("#policy_dont").removeClass("btn-primary");
+                        $("#policy_dont").addClass("btn-outline-primary");
+                        $("#helpTextSolar").show();
+                        $("#helpTextFixed").hide();
+                        $("#helpTextDont").hide();
+                    } else if (json == 1) {
+                        $("#policy_solar").removeClass("btn-primary");
+                        $("#policy_solar").addClass("btn-outline-primary");
+                        $("#policy_fixed").removeClass("btn-outline-primary");
+                        $("#policy_fixed").addClass("btn-primary");
+                        $("#policy_dont").removeClass("btn-primary");
+                        $("#policy_dont").addClass("btn-outline-primary");
+                        $("#helpTextSolar").hide();
+                        $("#helpTextFixed").show();
+                        $("#helpTextDont").hide();
+                    } else if (json == 2) {
+                        $("#policy_solar").removeClass("btn-primary");
+                        $("#policy_solar").addClass("btn-outline-primary");
+                        $("#policy_fixed").removeClass("btn-primary");
+                        $("#policy_fixed").addClass("btn-outline-primary");
+                        $("#policy_dont").removeClass("btn-outline-primary");
+                        $("#policy_dont").addClass("btn-primary");
+                        $("#helpTextSolar").hide();
+                        $("#helpTextFixed").hide();
+                        $("#helpTextDont").show();
+                    } else {
+                        // TWCmanager (re)started and policy not yet initialized?
+                        console.log('unknown policy action "' + json + '"');
+                    }
+                }
+            });
+            setTimeout(updateAction, 3000);
+        }
+        updateAction();
+    });
+
     // AJAJ refresh for getSlaveTWCs API call
     $(document).ready(function() {
         function requestSlaves() {
@@ -79,7 +130,7 @@
                     var json = $.parseJSON(data);
                     Object.keys(json).forEach(function(key) {
                         var slvtwc = json[key];
-                        var twc = '#' + slvtwc['TWCID']
+                        var twc = '#' + slvtwc['TWCID'].toLowerCase()
                         Object.keys(slvtwc).forEach(function(key) {
                           $(twc+'_'+key).html(slvtwc[key]);
                         });
